@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef, useEffect, Suspense } from 'react';
+import { useState, useMemo, useRef, useEffect, Suspense, useCallback } from 'react';
 import { Canvas, useFrame, extend } from '@react-three/fiber';
 import {
   OrbitControls,
@@ -430,11 +430,23 @@ const Experience = ({ sceneState, rotationSpeed, activeId, onSelect }: any) => {
   );
 };
 
-// --- Gesture Controller ---
+// --- Gesture Controller (Fixed for Infinite Loop & Stability) ---
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const GestureController = ({ onGesture, onMove, onStatus, debugMode }: any) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  
+  // 使用 Ref 保存最新的回调函数，这样 useEffect 不需要依赖它们，避免死循环
+  const onGestureRef = useRef(onGesture);
+  const onMoveRef = useRef(onMove);
+  const onStatusRef = useRef(onStatus);
+
+  // 每次渲染更新 ref
+  useEffect(() => {
+    onGestureRef.current = onGesture;
+    onMoveRef.current = onMove;
+    onStatusRef.current = onStatus;
+  }, [onGesture, onMove, onStatus]);
 
   useEffect(() => {
     let gestureRecognizer: GestureRecognizer;
@@ -443,7 +455,8 @@ const GestureController = ({ onGesture, onMove, onStatus, debugMode }: any) => {
     let lastGestureTime = 0;
 
     const setup = async () => {
-      onStatus("DOWNLOADING AI...");
+      // 使用 ref 调用，防止闭包过时
+      onStatusRef.current("DOWNLOADING AI...");
       try {
         const vision = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm");
         gestureRecognizer = await GestureRecognizer.createFromOptions(vision, {
@@ -454,20 +467,20 @@ const GestureController = ({ onGesture, onMove, onStatus, debugMode }: any) => {
           runningMode: "VIDEO",
           numHands: 1
         });
-        onStatus("REQUESTING CAMERA...");
+        onStatusRef.current("REQUESTING CAMERA...");
         if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
           const stream = await navigator.mediaDevices.getUserMedia({ video: true });
           if (videoRef.current) {
             videoRef.current.srcObject = stream;
             videoRef.current.play();
-            onStatus("AI READY: SHOW HAND");
+            onStatusRef.current("AI READY: SHOW HAND");
             predictWebcam();
           }
         } else {
-            onStatus("ERROR: CAMERA PERMISSION DENIED");
+            onStatusRef.current("ERROR: CAMERA PERMISSION DENIED");
         }
       } catch (err: any) {
-        onStatus(`ERROR: ${err.message || 'MODEL FAILED'}`);
+        onStatusRef.current(`ERROR: ${err.message || 'MODEL FAILED'}`);
       }
     };
 
@@ -476,15 +489,20 @@ const GestureController = ({ onGesture, onMove, onStatus, debugMode }: any) => {
         if (videoRef.current.videoWidth > 0) {
             const results = gestureRecognizer.recognizeForVideo(videoRef.current, Date.now());
             const ctx = canvasRef.current.getContext("2d");
+            
+            // 绘制调试画面
             if (ctx && debugMode) {
                 ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
-                canvasRef.current.width = videoRef.current.videoWidth; canvasRef.current.height = videoRef.current.videoHeight;
+                canvasRef.current.width = videoRef.current.videoWidth; 
+                canvasRef.current.height = videoRef.current.videoHeight;
                 if (results.landmarks) for (const landmarks of results.landmarks) {
                         const drawingUtils = new DrawingUtils(ctx);
                         drawingUtils.drawConnectors(landmarks, GestureRecognizer.HAND_CONNECTIONS, { color: "#FFD700", lineWidth: 2 });
                         drawingUtils.drawLandmarks(landmarks, { color: "#FF0000", lineWidth: 1 });
                 }
-            } else if (ctx && !debugMode) ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+            } else if (ctx && !debugMode) {
+              ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+            }
 
             if (results.gestures.length > 0) {
               const name = results.gestures[0][0].categoryName; 
@@ -492,28 +510,31 @@ const GestureController = ({ onGesture, onMove, onStatus, debugMode }: any) => {
               
               if (score > 0.4) {
                  if (name !== lastGesture || (Date.now() - lastGestureTime > 1000)) {
-                    if (name === "Open_Palm") onGesture("CHAOS");
-                    if (name === "Closed_Fist") onGesture("FORMED");
-                    if (name === "Victory") onGesture("PICK_ONE");
+                    if (name === "Open_Palm") onGestureRef.current("CHAOS");
+                    if (name === "Closed_Fist") onGestureRef.current("FORMED");
+                    if (name === "Victory") onGestureRef.current("PICK_ONE");
                     
                     lastGesture = name;
                     lastGestureTime = Date.now();
                  }
-                 if (debugMode) onStatus(`DETECTED: ${name}`);
+                 if (debugMode) onStatusRef.current(`DETECTED: ${name}`);
               }
 
               if (results.landmarks.length > 0) {
                 const speed = (0.5 - results.landmarks[0][0].x) * 0.15;
-                onMove(Math.abs(speed) > 0.01 ? speed : 0);
+                onMoveRef.current(Math.abs(speed) > 0.01 ? speed : 0);
               }
-            } else { onMove(0); if (debugMode) onStatus("AI READY: NO HAND"); }
+            } else { 
+              onMoveRef.current(0); 
+              if (debugMode) onStatusRef.current("AI READY: NO HAND"); 
+            }
         }
         requestRef = requestAnimationFrame(predictWebcam);
       }
     };
     setup();
     return () => cancelAnimationFrame(requestRef);
-  }, [onGesture, onMove, onStatus, debugMode]);
+  }, [debugMode]); // 关键：依赖项极少，不再依赖回调函数，彻底杜绝死循环
 
   return (
     <>
@@ -531,11 +552,10 @@ export default function GrandTreeApp() {
   const [debugMode, setDebugMode] = useState(false);
   const [activePhoto, setActivePhoto] = useState<number | null>(null);
   
-  // 音乐控制状态
+  // 音乐控制
   const [isPlaying, setIsPlaying] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  // 播放/暂停控制
   const toggleMusic = () => {
     if (audioRef.current) {
       if (isPlaying) {
@@ -547,28 +567,29 @@ export default function GrandTreeApp() {
     }
   };
 
-  // 处理手势指令
-  const handleGestureCommand = (command: string) => {
+  // 使用 useCallback 包裹回调，虽然 GestureController 已经做了防护，这也是双重保险
+  const handleGestureCommand = useCallback((command: string) => {
     if (command === 'CHAOS') {
       setSceneState('CHAOS');
       setActivePhoto(null);
     } else if (command === 'FORMED') {
       setSceneState('FORMED');
-      // 如果还没播放音乐，且识别到组装树的手势（握拳），自动播放音乐
       if (audioRef.current && !isPlaying) {
-        audioRef.current.play().then(() => setIsPlaying(true)).catch(e => console.log("Auto play prevented"));
+        audioRef.current.play().then(() => setIsPlaying(true)).catch(() => {});
       }
     } else if (command === 'PICK_ONE') {
-      if (sceneState === 'FORMED') {
-        const randomId = Math.floor(Math.random() * CONFIG.counts.ornaments);
-        setActivePhoto(randomId);
-      }
+      setSceneState((currentState) => {
+         if (currentState === 'FORMED') {
+            const randomId = Math.floor(Math.random() * CONFIG.counts.ornaments);
+            setActivePhoto(randomId);
+         }
+         return currentState;
+      });
     }
-  };
+  }, [isPlaying]);
 
   return (
     <div style={{ width: '100vw', height: '100vh', backgroundColor: '#000', position: 'relative', overflow: 'hidden' }}>
-      {/* 背景音乐元素 */}
       <audio ref={audioRef} src="./music.mp3" loop />
 
       <div style={{ width: '100%', height: '100%', position: 'absolute', top: 0, left: 0, zIndex: 1 }}>
@@ -583,45 +604,48 @@ export default function GrandTreeApp() {
       </div>
       <GestureController onGesture={handleGestureCommand} onMove={setRotationSpeed} onStatus={setAiStatus} debugMode={debugMode} />
 
-      {/* UI - Stats */}
-      <div style={{ position: 'absolute', bottom: '30px', left: '40px', color: '#888', zIndex: 10, fontFamily: 'sans-serif', userSelect: 'none', pointerEvents: 'none' }}>
-        <div style={{ marginBottom: '15px' }}>
-          <p style={{ fontSize: '10px', letterSpacing: '2px', textTransform: 'uppercase', marginBottom: '4px' }}>Memories</p>
-          <p style={{ fontSize: '24px', color: '#FFD700', fontWeight: 'bold', margin: 0 }}>
-            {CONFIG.counts.ornaments.toLocaleString()} <span style={{ fontSize: '10px', color: '#555', fontWeight: 'normal' }}>POLAROIDS</span>
-          </p>
-        </div>
-        <div>
-          <p style={{ fontSize: '10px', letterSpacing: '2px', textTransform: 'uppercase', marginBottom: '4px' }}>Foliage</p>
-          <p style={{ fontSize: '24px', color: '#004225', fontWeight: 'bold', margin: 0 }}>
-            {(CONFIG.counts.foliage / 1000).toFixed(0)}K <span style={{ fontSize: '10px', color: '#555', fontWeight: 'normal' }}>EMERALD NEEDLES</span>
+      {/* UI - Stats (Mobile Optimized) */}
+      <div style={{ position: 'absolute', bottom: '80px', left: '20px', color: '#888', zIndex: 10, fontFamily: 'sans-serif', userSelect: 'none', pointerEvents: 'none' }}>
+        <div style={{ marginBottom: '10px' }}>
+          <p style={{ fontSize: '18px', color: '#FFD700', fontWeight: 'bold', margin: 0 }}>
+            {CONFIG.counts.ornaments.toLocaleString()} <span style={{ fontSize: '10px', color: '#555', fontWeight: 'normal' }}>PHOTOS</span>
           </p>
         </div>
       </div>
 
-      {/* UI - Buttons */}
-      <div style={{ position: 'absolute', bottom: '30px', right: '40px', zIndex: 10, display: 'flex', gap: '10px' }}>
-        {/* 音乐开关按钮 */}
-        <button onClick={toggleMusic} style={{ padding: '12px 15px', backgroundColor: isPlaying ? '#FFD700' : 'rgba(0,0,0,0.5)', border: '1px solid #FFD700', color: isPlaying ? '#000' : '#FFD700', fontFamily: 'sans-serif', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer', backdropFilter: 'blur(4px)' }}>
-           {isPlaying ? '🎵 PLAYING' : '🔇 MUSIC OFF'}
+      {/* UI - Buttons (Mobile Responsive: Centered & Wrap) */}
+      <div style={{ 
+        position: 'absolute', 
+        bottom: '20px', 
+        left: 0, 
+        right: 0, 
+        zIndex: 10, 
+        display: 'flex', 
+        justifyContent: 'center', 
+        flexWrap: 'wrap', 
+        gap: '8px',
+        padding: '0 10px' 
+      }}>
+        <button onClick={toggleMusic} style={{ padding: '8px 12px', backgroundColor: isPlaying ? '#FFD700' : 'rgba(0,0,0,0.5)', border: '1px solid #FFD700', color: isPlaying ? '#000' : '#FFD700', fontFamily: 'sans-serif', fontSize: '10px', fontWeight: 'bold', cursor: 'pointer', backdropFilter: 'blur(4px)', borderRadius: '4px' }}>
+           {isPlaying ? '🎵 ON' : '🔇 OFF'}
         </button>
         
-        <button onClick={() => setDebugMode(!debugMode)} style={{ padding: '12px 15px', backgroundColor: debugMode ? '#FFD700' : 'rgba(0,0,0,0.5)', border: '1px solid #FFD700', color: debugMode ? '#000' : '#FFD700', fontFamily: 'sans-serif', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer', backdropFilter: 'blur(4px)' }}>
-           {debugMode ? 'HIDE DEBUG' : '🛠 DEBUG'}
+        <button onClick={() => setDebugMode(!debugMode)} style={{ padding: '8px 12px', backgroundColor: debugMode ? '#FFD700' : 'rgba(0,0,0,0.5)', border: '1px solid #FFD700', color: debugMode ? '#000' : '#FFD700', fontFamily: 'sans-serif', fontSize: '10px', fontWeight: 'bold', cursor: 'pointer', backdropFilter: 'blur(4px)', borderRadius: '4px' }}>
+           {debugMode ? 'HIDE' : '🛠 DEBUG'}
         </button>
-        <button onClick={() => setSceneState(s => s === 'CHAOS' ? 'FORMED' : 'CHAOS')} style={{ padding: '12px 30px', backgroundColor: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255, 215, 0, 0.5)', color: '#FFD700', fontFamily: 'serif', fontSize: '14px', fontWeight: 'bold', letterSpacing: '3px', textTransform: 'uppercase', cursor: 'pointer', backdropFilter: 'blur(4px)' }}>
-           {sceneState === 'CHAOS' ? 'Assemble Tree' : 'Disperse'}
+        
+        <button onClick={() => setSceneState(s => s === 'CHAOS' ? 'FORMED' : 'CHAOS')} style={{ padding: '8px 20px', backgroundColor: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255, 215, 0, 0.5)', color: '#FFD700', fontFamily: 'serif', fontSize: '12px', fontWeight: 'bold', letterSpacing: '1px', textTransform: 'uppercase', cursor: 'pointer', backdropFilter: 'blur(4px)', borderRadius: '4px' }}>
+           {sceneState === 'CHAOS' ? 'ASSEMBLE' : 'DISPERSE'}
         </button>
       </div>
 
       {/* UI - Instructions */}
-      <div style={{ position: 'absolute', top: '50px', left: '50%', transform: 'translateX(-50%)', textAlign: 'center', color: 'rgba(255,255,255,0.6)', fontSize: '12px', zIndex: 5, pointerEvents: 'none' }}>
-        <p>👋 Open Hand: Disperse | ✊ Fist: Assemble | ✌️ Victory: Random Pick</p>
-        <p style={{fontSize: '10px', marginTop: '5px'}}>👆 Click photo to zoom</p>
+      <div style={{ position: 'absolute', top: '20px', width: '100%', textAlign: 'center', color: 'rgba(255,255,255,0.6)', fontSize: '10px', zIndex: 5, pointerEvents: 'none' }}>
+        <p>👋Open:Reset | ✊Fist:Start | ✌️Victory:Pick</p>
       </div>
 
       {/* UI - AI Status */}
-      <div style={{ position: 'absolute', top: '20px', left: '50%', transform: 'translateX(-50%)', color: aiStatus.includes('ERROR') ? '#FF0000' : 'rgba(255, 215, 0, 0.4)', fontSize: '10px', letterSpacing: '2px', zIndex: 10, background: 'rgba(0,0,0,0.5)', padding: '4px 8px', borderRadius: '4px' }}>
+      <div style={{ position: 'absolute', top: '45px', left: '50%', transform: 'translateX(-50%)', color: aiStatus.includes('ERROR') ? '#FF0000' : 'rgba(255, 215, 0, 0.4)', fontSize: '9px', letterSpacing: '1px', zIndex: 10, background: 'rgba(0,0,0,0.5)', padding: '2px 6px', borderRadius: '4px', whiteSpace: 'nowrap' }}>
         {aiStatus}
       </div>
     </div>
