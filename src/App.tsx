@@ -18,7 +18,7 @@ import { GestureRecognizer, FilesetResolver, DrawingUtils } from "@mediapipe/tas
 
 // --- 动态生成照片列表 (top.jpg + 1.jpg 到 31.jpg) ---
 const TOTAL_NUMBERED_PHOTOS = 31;
-// 【关键修改】这里改成了 ./photos/ (相对路径)，这是解决 404 错误的核心！
+// 相对路径确保在 GitHub Pages 上正确加载
 const bodyPhotoPaths = [
   './photos/top.jpg',
   ...Array.from({ length: TOTAL_NUMBERED_PHOTOS }, (_, i) => `./photos/${i + 1}.jpg`)
@@ -27,29 +27,26 @@ const bodyPhotoPaths = [
 // --- 视觉配置 ---
 const CONFIG = {
   colors: {
-    emerald: '#004225', // 纯正祖母绿
+    emerald: '#004225',
     gold: '#FFD700',
     silver: '#ECEFF1',
     red: '#D32F2F',
     green: '#2E7D32',
-    white: '#FFFFFF',   // 纯白色
+    white: '#FFFFFF',
     warmLight: '#FFD54F',
-    lights: ['#FF0000', '#00FF00', '#0000FF', '#FFFF00'], // 彩灯
-    // 拍立得边框颜色池 (复古柔和色系)
+    lights: ['#FF0000', '#00FF00', '#0000FF', '#FFFF00'],
     borders: ['#FFFAF0', '#F0E68C', '#E6E6FA', '#FFB6C1', '#98FB98', '#87CEFA', '#FFDAB9'],
-    // 圣诞元素颜色
     giftColors: ['#D32F2F', '#FFD700', '#1976D2', '#2E7D32'],
     candyColors: ['#FF0000', '#FFFFFF']
   },
   counts: {
     foliage: 15000,
-    ornaments: 300,   // 拍立得照片数量
-    elements: 200,    // 圣诞元素数量
-    lights: 400       // 彩灯数量
+    ornaments: 300,
+    elements: 200,
+    lights: 400
   },
-  tree: { height: 22, radius: 9 }, // 树体尺寸
+  tree: { height: 22, radius: 9 },
   photos: {
-    // top 属性不再需要，因为已经移入 body
     body: bodyPhotoPaths
   }
 };
@@ -123,8 +120,8 @@ const Foliage = ({ state }: { state: 'CHAOS' | 'FORMED' }) => {
   );
 };
 
-// --- Component: Photo Ornaments (Double-Sided Polaroid) ---
-const PhotoOrnaments = ({ state }: { state: 'CHAOS' | 'FORMED' }) => {
+// --- Component: Photo Ornaments (Interactable) ---
+const PhotoOrnaments = ({ state, activeId, onSelect }: { state: 'CHAOS' | 'FORMED', activeId: number | null, onSelect: (id: number | null) => void }) => {
   const textures = useTexture(CONFIG.photos.body);
   const count = CONFIG.counts.ornaments;
   const groupRef = useRef<THREE.Group>(null);
@@ -170,17 +167,40 @@ const PhotoOrnaments = ({ state }: { state: 'CHAOS' | 'FORMED' }) => {
     if (!groupRef.current) return;
     const isFormed = state === 'FORMED';
     const time = stateObj.clock.elapsedTime;
+    const cameraPos = stateObj.camera.position;
 
     groupRef.current.children.forEach((group, i) => {
       const objData = data[i];
-      const target = isFormed ? objData.targetPos : objData.chaosPos;
+      // 如果是被选中的照片，目标位置在相机正前方
+      const isActive = activeId === i;
+      
+      let target;
+      if (isActive) {
+        // 飞到相机前方固定距离
+        const direction = new THREE.Vector3(0, 0, -25).applyQuaternion(stateObj.camera.quaternion);
+        target = cameraPos.clone().add(direction);
+      } else {
+        target = isFormed ? objData.targetPos : objData.chaosPos;
+      }
 
-      objData.currentPos.lerp(target, delta * (isFormed ? 0.8 * objData.weight : 0.5));
+      // 选中的话飞快一点，不选中的话按原来的速度
+      const speed = isActive ? 3.0 : (isFormed ? 0.8 * objData.weight : 0.5);
+      objData.currentPos.lerp(target, delta * speed);
       group.position.copy(objData.currentPos);
 
-      if (isFormed) {
+      // 旋转逻辑
+      if (isActive) {
+        // 选中时总是面向相机
+        group.lookAt(cameraPos);
+        // 选中时放大
+        const targetScale = 6.0;
+        group.scale.lerp(new THREE.Vector3(targetScale, targetScale, targetScale), delta * 3);
+      } else if (isFormed) {
          const targetLookPos = new THREE.Vector3(group.position.x * 2, group.position.y + 0.5, group.position.z * 2);
          group.lookAt(targetLookPos);
+         
+         // 恢复原始大小
+         group.scale.lerp(new THREE.Vector3(objData.scale, objData.scale, objData.scale), delta * 2);
 
          const wobbleX = Math.sin(time * objData.wobbleSpeed + objData.wobbleOffset) * 0.05;
          const wobbleZ = Math.cos(time * objData.wobbleSpeed * 0.8 + objData.wobbleOffset) * 0.05;
@@ -191,6 +211,8 @@ const PhotoOrnaments = ({ state }: { state: 'CHAOS' | 'FORMED' }) => {
          group.rotation.x += delta * objData.rotationSpeed.x;
          group.rotation.y += delta * objData.rotationSpeed.y;
          group.rotation.z += delta * objData.rotationSpeed.z;
+         // 恢复原始大小
+         group.scale.lerp(new THREE.Vector3(objData.scale, objData.scale, objData.scale), delta * 2);
       }
     });
   });
@@ -198,7 +220,18 @@ const PhotoOrnaments = ({ state }: { state: 'CHAOS' | 'FORMED' }) => {
   return (
     <group ref={groupRef}>
       {data.map((obj, i) => (
-        <group key={i} scale={[obj.scale, obj.scale, obj.scale]} rotation={state === 'CHAOS' ? obj.chaosRotation : [0,0,0]}>
+        <group 
+          key={i} 
+          scale={[obj.scale, obj.scale, obj.scale]} 
+          rotation={state === 'CHAOS' ? obj.chaosRotation : [0,0,0]}
+          onClick={(e) => {
+            e.stopPropagation(); // 防止穿透
+            // 如果点击的是已经放大的，就缩小(null)；否则放大当前(i)
+            onSelect(activeId === i ? null : i);
+          }}
+          onPointerOver={() => { document.body.style.cursor = 'pointer'; }}
+          onPointerOut={() => { document.body.style.cursor = 'auto'; }}
+        >
           {/* 正面 */}
           <group position={[0, 0, 0.015]}>
             <mesh geometry={photoGeometry}>
@@ -330,7 +363,7 @@ const FairyLights = ({ state }: { state: 'CHAOS' | 'FORMED' }) => {
   );
 };
 
-// --- Component: Top Star (No Photo, Pure Gold 3D Star) ---
+// --- Component: Top Star ---
 const TopStar = ({ state }: { state: 'CHAOS' | 'FORMED' }) => {
   const groupRef = useRef<THREE.Group>(null);
 
@@ -348,18 +381,12 @@ const TopStar = ({ state }: { state: 'CHAOS' | 'FORMED' }) => {
 
   const starGeometry = useMemo(() => {
     return new THREE.ExtrudeGeometry(starShape, {
-      depth: 0.4, // 增加一点厚度
-      bevelEnabled: true, bevelThickness: 0.1, bevelSize: 0.1, bevelSegments: 3,
+      depth: 0.4, bevelEnabled: true, bevelThickness: 0.1, bevelSize: 0.1, bevelSegments: 3,
     });
   }, [starShape]);
 
-  // 纯金材质
   const goldMaterial = useMemo(() => new THREE.MeshStandardMaterial({
-    color: CONFIG.colors.gold,
-    emissive: CONFIG.colors.gold,
-    emissiveIntensity: 1.5, // 适中亮度，既发光又有质感
-    roughness: 0.1,
-    metalness: 1.0,
+    color: CONFIG.colors.gold, emissive: CONFIG.colors.gold, emissiveIntensity: 1.5, roughness: 0.1, metalness: 1.0,
   }), []);
 
   useFrame((_, delta) => {
@@ -380,10 +407,13 @@ const TopStar = ({ state }: { state: 'CHAOS' | 'FORMED' }) => {
 };
 
 // --- Main Scene Experience ---
-const Experience = ({ sceneState, rotationSpeed }: { sceneState: 'CHAOS' | 'FORMED', rotationSpeed: number }) => {
+const Experience = ({ sceneState, rotationSpeed, activeId, onSelect }: any) => {
   const controlsRef = useRef<any>(null);
   useFrame(() => {
     if (controlsRef.current) {
+      // 当有照片放大时，自动停止旋转
+      const autoRotate = rotationSpeed === 0 && sceneState === 'FORMED' && activeId === null;
+      controlsRef.current.autoRotate = autoRotate;
       controlsRef.current.setAzimuthalAngle(controlsRef.current.getAzimuthalAngle() + rotationSpeed);
       controlsRef.current.update();
     }
@@ -392,7 +422,7 @@ const Experience = ({ sceneState, rotationSpeed }: { sceneState: 'CHAOS' | 'FORM
   return (
     <>
       <PerspectiveCamera makeDefault position={[0, 8, 60]} fov={45} />
-      <OrbitControls ref={controlsRef} enablePan={false} enableZoom={true} minDistance={30} maxDistance={120} autoRotate={rotationSpeed === 0 && sceneState === 'FORMED'} autoRotateSpeed={0.3} maxPolarAngle={Math.PI / 1.7} />
+      <OrbitControls ref={controlsRef} enablePan={false} enableZoom={true} minDistance={30} maxDistance={120} autoRotateSpeed={0.3} maxPolarAngle={Math.PI / 1.7} />
 
       <color attach="background" args={['#000300']} />
       <Stars radius={100} depth={50} count={5000} factor={4} saturation={0} fade speed={1} />
@@ -406,7 +436,7 @@ const Experience = ({ sceneState, rotationSpeed }: { sceneState: 'CHAOS' | 'FORM
       <group position={[0, -6, 0]}>
         <Foliage state={sceneState} />
         <Suspense fallback={null}>
-           <PhotoOrnaments state={sceneState} />
+           <PhotoOrnaments state={sceneState} activeId={activeId} onSelect={onSelect} />
            <ChristmasElements state={sceneState} />
            <FairyLights state={sceneState} />
            <TopStar state={sceneState} />
@@ -431,6 +461,8 @@ const GestureController = ({ onGesture, onMove, onStatus, debugMode }: any) => {
   useEffect(() => {
     let gestureRecognizer: GestureRecognizer;
     let requestRef: number;
+    let lastGesture = "";
+    let lastGestureTime = 0;
 
     const setup = async () => {
       onStatus("DOWNLOADING AI...");
@@ -477,11 +509,22 @@ const GestureController = ({ onGesture, onMove, onStatus, debugMode }: any) => {
             } else if (ctx && !debugMode) ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
 
             if (results.gestures.length > 0) {
-              const name = results.gestures[0][0].categoryName; const score = results.gestures[0][0].score;
+              const name = results.gestures[0][0].categoryName; 
+              const score = results.gestures[0][0].score;
+              
               if (score > 0.4) {
-                 if (name === "Open_Palm") onGesture("CHAOS"); if (name === "Closed_Fist") onGesture("FORMED");
+                 // 简单的防抖动逻辑
+                 if (name !== lastGesture || (Date.now() - lastGestureTime > 1000)) {
+                    if (name === "Open_Palm") onGesture("CHAOS");
+                    if (name === "Closed_Fist") onGesture("FORMED");
+                    if (name === "Victory") onGesture("PICK_ONE"); // 剪刀手：随机选择
+                    
+                    lastGesture = name;
+                    lastGestureTime = Date.now();
+                 }
                  if (debugMode) onStatus(`DETECTED: ${name}`);
               }
+
               if (results.landmarks.length > 0) {
                 const speed = (0.5 - results.landmarks[0][0].x) * 0.15;
                 onMove(Math.abs(speed) > 0.01 ? speed : 0);
@@ -509,18 +552,40 @@ export default function GrandTreeApp() {
   const [rotationSpeed, setRotationSpeed] = useState(0);
   const [aiStatus, setAiStatus] = useState("INITIALIZING...");
   const [debugMode, setDebugMode] = useState(false);
+  const [activePhoto, setActivePhoto] = useState<number | null>(null);
+
+  // 处理手势指令
+  const handleGestureCommand = (command: string) => {
+    if (command === 'CHAOS') {
+      setSceneState('CHAOS');
+      setActivePhoto(null); // 散开时取消选择
+    } else if (command === 'FORMED') {
+      setSceneState('FORMED');
+    } else if (command === 'PICK_ONE') {
+      // 随机选择一张照片放大
+      if (sceneState === 'FORMED') {
+        const randomId = Math.floor(Math.random() * CONFIG.counts.ornaments);
+        setActivePhoto(randomId);
+      }
+    }
+  };
 
   return (
     <div style={{ width: '100vw', height: '100vh', backgroundColor: '#000', position: 'relative', overflow: 'hidden' }}>
       <div style={{ width: '100%', height: '100%', position: 'absolute', top: 0, left: 0, zIndex: 1 }}>
         <Canvas dpr={[1, 2]} gl={{ toneMapping: THREE.ReinhardToneMapping }} shadows>
-            <Experience sceneState={sceneState} rotationSpeed={rotationSpeed} />
+            <Experience 
+              sceneState={sceneState} 
+              rotationSpeed={rotationSpeed} 
+              activeId={activePhoto}
+              onSelect={setActivePhoto}
+            />
         </Canvas>
       </div>
-      <GestureController onGesture={setSceneState} onMove={setRotationSpeed} onStatus={setAiStatus} debugMode={debugMode} />
+      <GestureController onGesture={handleGestureCommand} onMove={setRotationSpeed} onStatus={setAiStatus} debugMode={debugMode} />
 
       {/* UI - Stats */}
-      <div style={{ position: 'absolute', bottom: '30px', left: '40px', color: '#888', zIndex: 10, fontFamily: 'sans-serif', userSelect: 'none' }}>
+      <div style={{ position: 'absolute', bottom: '30px', left: '40px', color: '#888', zIndex: 10, fontFamily: 'sans-serif', userSelect: 'none', pointerEvents: 'none' }}>
         <div style={{ marginBottom: '15px' }}>
           <p style={{ fontSize: '10px', letterSpacing: '2px', textTransform: 'uppercase', marginBottom: '4px' }}>Memories</p>
           <p style={{ fontSize: '24px', color: '#FFD700', fontWeight: 'bold', margin: 0 }}>
@@ -543,6 +608,12 @@ export default function GrandTreeApp() {
         <button onClick={() => setSceneState(s => s === 'CHAOS' ? 'FORMED' : 'CHAOS')} style={{ padding: '12px 30px', backgroundColor: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255, 215, 0, 0.5)', color: '#FFD700', fontFamily: 'serif', fontSize: '14px', fontWeight: 'bold', letterSpacing: '3px', textTransform: 'uppercase', cursor: 'pointer', backdropFilter: 'blur(4px)' }}>
            {sceneState === 'CHAOS' ? 'Assemble Tree' : 'Disperse'}
         </button>
+      </div>
+
+      {/* UI - Instructions */}
+      <div style={{ position: 'absolute', top: '50px', left: '50%', transform: 'translateX(-50%)', textAlign: 'center', color: 'rgba(255,255,255,0.6)', fontSize: '12px', zIndex: 5, pointerEvents: 'none' }}>
+        <p>👋 Open Hand: Disperse | ✊ Fist: Assemble | ✌️ Victory: Random Pick</p>
+        <p style={{fontSize: '10px', marginTop: '5px'}}>👆 Click photo to zoom</p>
       </div>
 
       {/* UI - AI Status */}
