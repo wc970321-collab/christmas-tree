@@ -1,5 +1,5 @@
 import { useState, useMemo, useRef, useEffect, Suspense, useCallback } from 'react';
-import { Canvas, useFrame, extend } from '@react-three/fiber';
+import { Canvas, useFrame, extend, useThree } from '@react-three/fiber';
 import {
   OrbitControls,
   Environment,
@@ -119,11 +119,13 @@ const Foliage = ({ state }: { state: 'CHAOS' | 'FORMED' }) => {
   );
 };
 
-// --- Component: Photo Ornaments (Adaptive Ratio & Centered) ---
-const PhotoOrnaments = ({ state, activeId, onSelect }: { state: 'CHAOS' | 'FORMED', activeId: number | null, onSelect: (id: number | null) => void }) => {
+// --- Component: Photo Ornaments (Centered & Responsive) ---
+const PhotoOrnaments = ({ state, activeId, onSelect, treeYPosition }: { state: 'CHAOS' | 'FORMED', activeId: number | null, onSelect: (id: number | null) => void, treeYPosition: number }) => {
   const textures = useTexture(CONFIG.photos.body);
   const count = CONFIG.counts.ornaments;
   const groupRef = useRef<THREE.Group>(null);
+  // 获取屏幕尺寸信息
+  const { viewport } = useThree();
 
   const baseGeometry = useMemo(() => new THREE.PlaneGeometry(1, 1), []);
 
@@ -165,30 +167,52 @@ const PhotoOrnaments = ({ state, activeId, onSelect }: { state: 'CHAOS' | 'FORME
     if (!groupRef.current) return;
     const isFormed = state === 'FORMED';
     const time = stateObj.clock.elapsedTime;
-    const cameraPos = stateObj.camera.position;
+    const camera = stateObj.camera;
 
     groupRef.current.children.forEach((group, i) => {
       const objData = data[i];
       const isActive = activeId === i;
       let target;
+
       if (isActive) {
-        // 【核心修改】计算屏幕正中心位置
-        // 0,0,-18 表示相机正前方18个单位处（之前是25，现在拉近了，会显得更大更居中）
-        const direction = new THREE.Vector3(0, 0, -18).applyQuaternion(stateObj.camera.quaternion);
-        target = cameraPos.clone().add(direction);
+        // 【核心修复：完美居中算法】
+        // 1. 获取相机前方固定距离（例如 15 单位）的世界坐标点
+        // 2. 将该世界坐标点转换为“树”的局部坐标系
+        // 这样无论树在哪里，照片都会乖乖飞到相机正前方
+        
+        const distanceInFront = 15; // 照片悬浮在相机前方多远
+        const vector = new THREE.Vector3(0, 0, -distanceInFront);
+        vector.applyQuaternion(camera.quaternion);
+        const targetWorldPos = camera.position.clone().add(vector);
+        
+        // 转换为局部坐标：目标世界坐标 - 父容器(树)的世界坐标
+        // 树的坐标是 [0, treeYPosition, 0]
+        target = new THREE.Vector3(
+            targetWorldPos.x,
+            targetWorldPos.y - treeYPosition, 
+            targetWorldPos.z
+        );
+
       } else {
         target = isFormed ? objData.targetPos : objData.chaosPos;
       }
-      const speed = isActive ? 3.5 : (isFormed ? 0.8 * objData.weight : 0.5);
+
+      const speed = isActive ? 4.0 : (isFormed ? 0.8 * objData.weight : 0.5);
       objData.currentPos.lerp(target, delta * speed);
       group.position.copy(objData.currentPos);
 
       if (isActive) {
-        // 始终面朝相机
-        group.lookAt(cameraPos);
-        // 放大倍数增加，确保居中时足够清晰
-        const targetScale = 7.0;
-        group.scale.lerp(new THREE.Vector3(targetScale, targetScale, targetScale), delta * 4);
+        group.lookAt(camera.position);
+        
+        // 【动态大小调整】
+        // 无论屏幕多大，让图片占据屏幕宽度的约 30-40%
+        // viewport.width 是当前 3D 视窗的宽度单位
+        const responsiveScale = Math.min(viewport.width, viewport.height) * 0.45;
+        // 限制一下最大和最小尺寸，防止极端的丑陋
+        const finalScale = THREE.MathUtils.clamp(responsiveScale, 3, 8);
+        
+        const targetScaleVector = new THREE.Vector3(finalScale, finalScale, finalScale);
+        group.scale.lerp(targetScaleVector, delta * 4);
       } else if (isFormed) {
          const targetLookPos = new THREE.Vector3(group.position.x * 2, group.position.y + 0.5, group.position.z * 2);
          group.lookAt(targetLookPos);
@@ -228,48 +252,16 @@ const PhotoOrnaments = ({ state, activeId, onSelect }: { state: 'CHAOS' | 'FORME
             onPointerOver={() => { document.body.style.cursor = 'pointer'; }}
             onPointerOut={() => { document.body.style.cursor = 'auto'; }}
           >
-            {/* Front: Photo */}
-            <mesh 
-              geometry={baseGeometry} 
-              position={[0, 0, 0.015]} 
-              scale={[pWidth, pHeight, 1]} 
-            >
-              <meshStandardMaterial
-                map={tex}
-                roughness={0.5} metalness={0}
-                emissive={CONFIG.colors.white} emissiveMap={tex} emissiveIntensity={1.0}
-                side={THREE.FrontSide}
-              />
+            <mesh geometry={baseGeometry} position={[0, 0, 0.015]} scale={[pWidth, pHeight, 1]}>
+              <meshStandardMaterial map={tex} roughness={0.5} metalness={0} emissive={CONFIG.colors.white} emissiveMap={tex} emissiveIntensity={1.0} side={THREE.FrontSide} />
             </mesh>
-            {/* Front: Border */}
-            <mesh 
-              geometry={baseGeometry} 
-              position={[0, -0.1, -0.01]} 
-              scale={[borderW, borderH, 1]} 
-            >
+            <mesh geometry={baseGeometry} position={[0, -0.1, -0.01]} scale={[borderW, borderH, 1]}>
               <meshStandardMaterial color={obj.borderColor} roughness={0.9} metalness={0} side={THREE.FrontSide} />
             </mesh>
-            {/* Back: Photo (Mirror) */}
-            <mesh 
-              geometry={baseGeometry} 
-              position={[0, 0, -0.015]} 
-              rotation={[0, Math.PI, 0]}
-              scale={[pWidth, pHeight, 1]}
-            >
-              <meshStandardMaterial
-                map={tex}
-                roughness={0.5} metalness={0}
-                emissive={CONFIG.colors.white} emissiveMap={tex} emissiveIntensity={1.0}
-                side={THREE.FrontSide}
-              />
+            <mesh geometry={baseGeometry} position={[0, 0, -0.015]} rotation={[0, Math.PI, 0]} scale={[pWidth, pHeight, 1]}>
+              <meshStandardMaterial map={tex} roughness={0.5} metalness={0} emissive={CONFIG.colors.white} emissiveMap={tex} emissiveIntensity={1.0} side={THREE.FrontSide} />
             </mesh>
-            {/* Back: Border */}
-            <mesh 
-              geometry={baseGeometry} 
-              position={[0, -0.1, -0.015]}
-              rotation={[0, Math.PI, 0]}
-              scale={[borderW, borderH, 1]}
-            >
+            <mesh geometry={baseGeometry} position={[0, -0.1, -0.015]} rotation={[0, Math.PI, 0]} scale={[borderW, borderH, 1]}>
               <meshStandardMaterial color={obj.borderColor} roughness={0.9} metalness={0} side={THREE.FrontSide} />
             </mesh>
           </group>
@@ -416,6 +408,16 @@ const TopStar = ({ state }: { state: 'CHAOS' | 'FORMED' }) => {
 // --- Main Scene Experience ---
 const Experience = ({ sceneState, rotationSpeed, activeId, onSelect }: any) => {
   const controlsRef = useRef<any>(null);
+  const { width, height } = useThree(state => state.size);
+  // 判断是否是竖屏手机
+  const isMobile = width < height;
+
+  // 【动态调整】
+  // 1. 树的高度位置：手机上(isMobile)往上提(-5.5)，电脑上(-8.0)
+  // 2. 相机距离：手机上相机视野窄，所以距离需要更远(80)才能看全，电脑上(60)
+  const treeY = isMobile ? -5.5 : -8.0;
+  const cameraZ = isMobile ? 80 : 60;
+
   useFrame(() => {
     if (controlsRef.current) {
       const autoRotate = rotationSpeed === 0 && sceneState === 'FORMED' && activeId === null;
@@ -427,7 +429,7 @@ const Experience = ({ sceneState, rotationSpeed, activeId, onSelect }: any) => {
 
   return (
     <>
-      <PerspectiveCamera makeDefault position={[0, 8, 60]} fov={45} />
+      <PerspectiveCamera makeDefault position={[0, 8, cameraZ]} fov={45} />
       <OrbitControls ref={controlsRef} enablePan={false} enableZoom={true} minDistance={30} maxDistance={120} autoRotateSpeed={0.3} maxPolarAngle={Math.PI / 1.7} />
 
       <color attach="background" args={['#000300']} />
@@ -439,17 +441,22 @@ const Experience = ({ sceneState, rotationSpeed, activeId, onSelect }: any) => {
       <pointLight position={[-30, 10, -30]} intensity={50} color={CONFIG.colors.gold} />
       <pointLight position={[0, -20, 10]} intensity={30} color="#ffffff" />
 
-      <group position={[0, -6, 0]}>
+      {/* 动态应用树的高度位置 */}
+      <group position={[0, treeY, 0]}>
         <Foliage state={sceneState} />
         <Suspense fallback={null}>
-           <PhotoOrnaments state={sceneState} activeId={activeId} onSelect={onSelect} />
+           <PhotoOrnaments 
+             state={sceneState} 
+             activeId={activeId} 
+             onSelect={onSelect}
+             treeYPosition={treeY} // 传入树的位置，用于计算图片居中偏移
+           />
            <ChristmasElements state={sceneState} />
            <FairyLights state={sceneState} />
            <TopStar state={sceneState} />
         </Suspense>
-        {/* 光斑 */}
+        {/* 光斑与雪花 */}
         <Sparkles count={600} scale={50} size={8} speed={0.4} opacity={0.4} color={CONFIG.colors.silver} />
-        {/* 雪花特效 */}
         <Sparkles count={1500} scale={[40, 40, 40]} size={2} speed={0.8} opacity={0.6} color="#FFFFFF" noise={0.2} />
       </group>
 
@@ -483,7 +490,6 @@ const GestureController = ({ onGesture, onMove, onStatus, debugMode }: any) => {
     let lastGestureTime = 0;
 
     const setup = async () => {
-      // AI状态文字只有在 debugMode 时才会显示
       if (debugMode) onStatusRef.current("DOWNLOADING AI...");
       try {
         const vision = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm");
@@ -655,7 +661,7 @@ export default function GrandTreeApp() {
         </button>
       </div>
 
-      {/* UI - AI Status (只在 DEBUG 模式下显示) */}
+      {/* UI - AI Status (Only in Debug Mode) */}
       {debugMode && (
         <div style={{ position: 'absolute', top: '45px', left: '50%', transform: 'translateX(-50%)', color: aiStatus.includes('ERROR') ? '#FF0000' : 'rgba(255, 215, 0, 0.4)', fontSize: '9px', letterSpacing: '1px', zIndex: 10, background: 'rgba(0,0,0,0.5)', padding: '2px 6px', borderRadius: '4px', whiteSpace: 'nowrap' }}>
             {aiStatus}
