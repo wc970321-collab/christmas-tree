@@ -602,4 +602,62 @@ export default function GrandTreeApp() {
         audioRef.current.play().then(() => setIsPlaying(true)).catch(() => {});
       }
     } else if (command === 'PICK_ONE') {
-      setSceneState((currentS
+      setSceneState((currentState) => {
+         if (currentState === 'CHAOS') {
+            const randomId = Math.floor(Math.random() * CONFIG.counts.ornaments);
+            setActivePhoto(randomId);
+         }
+         return currentState;
+      });
+    }
+  }, [isPlaying]);
+
+  return (
+    <div style={{ width: '100vw', height: '100vh', backgroundColor: '#000', position: 'relative', overflow: 'hidden' }}>
+      <audio ref={audioRef} src="./music.mp3" loop />
+
+      <div style={{ width: '100%', height: '100%', position: 'absolute', top: 0, left: 0, zIndex: 1 }}>
+        <Canvas dpr={[1, 2]} gl={{ toneMapping: THREE.ReinhardToneMapping }} shadows>
+            <Experience 
+              sceneState={sceneState} 
+              rotationSpeed={rotationSpeed} 
+              activeId={activePhoto}
+              onSelect={setActivePhoto}
+            />
+        </Canvas>
+      </div>
+      <GestureController onGesture={handleGestureCommand} onMove={setRotationSpeed} onStatus={setAiStatus} debugMode={debugMode} />
+
+      {/* UI - Buttons */}
+      <div style={{ 
+        position: 'absolute', 
+        bottom: '20px', 
+        left: 0, 
+        right: 0, 
+        zIndex: 10, 
+        display: 'flex', 
+        justifyContent: 'center', 
+        flexWrap: 'wrap', 
+        gap: '8px',
+        padding: '0 10px' 
+      }}>
+        <button onClick={toggleMusic} style={{ padding: '8px 12px', backgroundColor: isPlaying ? '#FFD700' : 'rgba(0,0,0,0.5)', border: '1px solid #FFD700', color: isPlaying ? '#000' : '#FFD700', fontFamily: 'sans-serif', fontSize: '10px', fontWeight: 'bold', cursor: 'pointer', backdropFilter: 'blur(4px)', borderRadius: '4px' }}>
+           {isPlaying ? '🎵 ON' : '🔇 OFF'}
+        </button>
+        
+        <button onClick={() => setDebugMode(!debugMode)} style={{ padding: '8px 12px', backgroundColor: debugMode ? '#FFD700' : 'rgba(0,0,0,0.5)', border: '1px solid #FFD700', color: debugMode ? '#000' : '#FFD700', fontFamily: 'sans-serif', fontSize: '10px', fontWeight: 'bold', cursor: 'pointer', backdropFilter: 'blur(4px)', borderRadius: '4px' }}>
+           {debugMode ? 'HIDE' : '🛠 DEBUG'}
+        </button>
+        
+        <button onClick={() => setSceneState(s => s === 'CHAOS' ? 'FORMED' : 'CHAOS')} style={{ padding: '8px 20px', backgroundColor: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255, 215, 0, 0.5)', color: '#FFD700', fontFamily: 'serif', fontSize: '12px', fontWeight: 'bold', letterSpacing: '1px', textTransform: 'uppercase', cursor: 'pointer', backdropFilter: 'blur(4px)', borderRadius: '4px' }}>
+           {sceneState === 'CHAOS' ? 'ASSEMBLE' : 'DISPERSE'}
+        </button>
+      </div>
+
+      {/* UI - AI Status */}
+      <div style={{ position: 'absolute', top: '45px', left: '50%', transform: 'translateX(-50%)', color: aiStatus.includes('ERROR') ? '#FF0000' : 'rgba(255, 215, 0, 0.4)', fontSize: '9px', letterSpacing: '1px', zIndex: 10, background: 'rgba(0,0,0,0.5)', padding: '2px 6px', borderRadius: '4px', whiteSpace: 'nowrap' }}>
+        {aiStatus}
+      </div>
+    </div>
+  );
+}
