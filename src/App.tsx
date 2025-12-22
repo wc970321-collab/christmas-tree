@@ -16,9 +16,8 @@ import { MathUtils } from 'three';
 import * as random from 'maath/random';
 import { GestureRecognizer, FilesetResolver, DrawingUtils } from "@mediapipe/tasks-vision";
 
-// --- 动态生成照片列表 (top.jpg + 1.jpg 到 31.jpg) ---
+// --- 动态生成照片列表 ---
 const TOTAL_NUMBERED_PHOTOS = 31;
-// 相对路径确保在 GitHub Pages 上正确加载
 const bodyPhotoPaths = [
   './photos/top.jpg',
   ...Array.from({ length: TOTAL_NUMBERED_PHOTOS }, (_, i) => `./photos/${i + 1}.jpg`)
@@ -120,7 +119,7 @@ const Foliage = ({ state }: { state: 'CHAOS' | 'FORMED' }) => {
   );
 };
 
-// --- Component: Photo Ornaments (Interactable) ---
+// --- Component: Photo Ornaments ---
 const PhotoOrnaments = ({ state, activeId, onSelect }: { state: 'CHAOS' | 'FORMED', activeId: number | null, onSelect: (id: number | null) => void }) => {
   const textures = useTexture(CONFIG.photos.body);
   const count = CONFIG.counts.ornaments;
@@ -171,47 +170,34 @@ const PhotoOrnaments = ({ state, activeId, onSelect }: { state: 'CHAOS' | 'FORME
 
     groupRef.current.children.forEach((group, i) => {
       const objData = data[i];
-      // 如果是被选中的照片，目标位置在相机正前方
       const isActive = activeId === i;
-      
       let target;
       if (isActive) {
-        // 飞到相机前方固定距离
         const direction = new THREE.Vector3(0, 0, -25).applyQuaternion(stateObj.camera.quaternion);
         target = cameraPos.clone().add(direction);
       } else {
         target = isFormed ? objData.targetPos : objData.chaosPos;
       }
-
-      // 选中的话飞快一点，不选中的话按原来的速度
       const speed = isActive ? 3.0 : (isFormed ? 0.8 * objData.weight : 0.5);
       objData.currentPos.lerp(target, delta * speed);
       group.position.copy(objData.currentPos);
 
-      // 旋转逻辑
       if (isActive) {
-        // 选中时总是面向相机
         group.lookAt(cameraPos);
-        // 选中时放大
         const targetScale = 6.0;
         group.scale.lerp(new THREE.Vector3(targetScale, targetScale, targetScale), delta * 3);
       } else if (isFormed) {
          const targetLookPos = new THREE.Vector3(group.position.x * 2, group.position.y + 0.5, group.position.z * 2);
          group.lookAt(targetLookPos);
-         
-         // 恢复原始大小
          group.scale.lerp(new THREE.Vector3(objData.scale, objData.scale, objData.scale), delta * 2);
-
          const wobbleX = Math.sin(time * objData.wobbleSpeed + objData.wobbleOffset) * 0.05;
          const wobbleZ = Math.cos(time * objData.wobbleSpeed * 0.8 + objData.wobbleOffset) * 0.05;
          group.rotation.x += wobbleX;
          group.rotation.z += wobbleZ;
-
       } else {
          group.rotation.x += delta * objData.rotationSpeed.x;
          group.rotation.y += delta * objData.rotationSpeed.y;
          group.rotation.z += delta * objData.rotationSpeed.z;
-         // 恢复原始大小
          group.scale.lerp(new THREE.Vector3(objData.scale, objData.scale, objData.scale), delta * 2);
       }
     });
@@ -225,14 +211,13 @@ const PhotoOrnaments = ({ state, activeId, onSelect }: { state: 'CHAOS' | 'FORME
           scale={[obj.scale, obj.scale, obj.scale]} 
           rotation={state === 'CHAOS' ? obj.chaosRotation : [0,0,0]}
           onClick={(e) => {
-            e.stopPropagation(); // 防止穿透
-            // 如果点击的是已经放大的，就缩小(null)；否则放大当前(i)
+            e.stopPropagation();
             onSelect(activeId === i ? null : i);
           }}
           onPointerOver={() => { document.body.style.cursor = 'pointer'; }}
           onPointerOut={() => { document.body.style.cursor = 'auto'; }}
         >
-          {/* 正面 */}
+          {/* Front */}
           <group position={[0, 0, 0.015]}>
             <mesh geometry={photoGeometry}>
               <meshStandardMaterial
@@ -246,7 +231,7 @@ const PhotoOrnaments = ({ state, activeId, onSelect }: { state: 'CHAOS' | 'FORME
               <meshStandardMaterial color={obj.borderColor} roughness={0.9} metalness={0} side={THREE.FrontSide} />
             </mesh>
           </group>
-          {/* 背面 */}
+          {/* Back */}
           <group position={[0, 0, -0.015]} rotation={[0, Math.PI, 0]}>
             <mesh geometry={photoGeometry}>
               <meshStandardMaterial
@@ -270,7 +255,6 @@ const PhotoOrnaments = ({ state, activeId, onSelect }: { state: 'CHAOS' | 'FORME
 const ChristmasElements = ({ state }: { state: 'CHAOS' | 'FORMED' }) => {
   const count = CONFIG.counts.elements;
   const groupRef = useRef<THREE.Group>(null);
-
   const boxGeometry = useMemo(() => new THREE.BoxGeometry(0.8, 0.8, 0.8), []);
   const sphereGeometry = useMemo(() => new THREE.SphereGeometry(0.5, 16, 16), []);
   const caneGeometry = useMemo(() => new THREE.CylinderGeometry(0.15, 0.15, 1.2, 8), []);
@@ -278,20 +262,15 @@ const ChristmasElements = ({ state }: { state: 'CHAOS' | 'FORMED' }) => {
   const data = useMemo(() => {
     return new Array(count).fill(0).map(() => {
       const chaosPos = new THREE.Vector3((Math.random()-0.5)*60, (Math.random()-0.5)*60, (Math.random()-0.5)*60);
-      const h = CONFIG.tree.height;
-      const y = (Math.random() * h) - (h / 2);
-      const rBase = CONFIG.tree.radius;
-      const currentRadius = (rBase * (1 - (y + (h/2)) / h)) * 0.95;
+      const h = CONFIG.tree.height; const y = (Math.random() * h) - (h / 2);
+      const rBase = CONFIG.tree.radius; const currentRadius = (rBase * (1 - (y + (h/2)) / h)) * 0.95;
       const theta = Math.random() * Math.PI * 2;
-
       const targetPos = new THREE.Vector3(currentRadius * Math.cos(theta), y, currentRadius * Math.sin(theta));
-
       const type = Math.floor(Math.random() * 3);
       let color; let scale = 1;
       if (type === 0) { color = CONFIG.colors.giftColors[Math.floor(Math.random() * CONFIG.colors.giftColors.length)]; scale = 0.8 + Math.random() * 0.4; }
       else if (type === 1) { color = CONFIG.colors.giftColors[Math.floor(Math.random() * CONFIG.colors.giftColors.length)]; scale = 0.6 + Math.random() * 0.4; }
       else { color = Math.random() > 0.5 ? CONFIG.colors.red : CONFIG.colors.white; scale = 0.7 + Math.random() * 0.3; }
-
       const rotationSpeed = { x: (Math.random()-0.5)*2.0, y: (Math.random()-0.5)*2.0, z: (Math.random()-0.5)*2.0 };
       return { type, chaosPos, targetPos, color, scale, currentPos: chaosPos.clone(), chaosRotation: new THREE.Euler(Math.random()*Math.PI, Math.random()*Math.PI, Math.random()*Math.PI), rotationSpeed };
     });
@@ -411,7 +390,6 @@ const Experience = ({ sceneState, rotationSpeed, activeId, onSelect }: any) => {
   const controlsRef = useRef<any>(null);
   useFrame(() => {
     if (controlsRef.current) {
-      // 当有照片放大时，自动停止旋转
       const autoRotate = rotationSpeed === 0 && sceneState === 'FORMED' && activeId === null;
       controlsRef.current.autoRotate = autoRotate;
       controlsRef.current.setAzimuthalAngle(controlsRef.current.getAzimuthalAngle() + rotationSpeed);
@@ -513,11 +491,10 @@ const GestureController = ({ onGesture, onMove, onStatus, debugMode }: any) => {
               const score = results.gestures[0][0].score;
               
               if (score > 0.4) {
-                 // 简单的防抖动逻辑
                  if (name !== lastGesture || (Date.now() - lastGestureTime > 1000)) {
                     if (name === "Open_Palm") onGesture("CHAOS");
                     if (name === "Closed_Fist") onGesture("FORMED");
-                    if (name === "Victory") onGesture("PICK_ONE"); // 剪刀手：随机选择
+                    if (name === "Victory") onGesture("PICK_ONE");
                     
                     lastGesture = name;
                     lastGestureTime = Date.now();
@@ -553,16 +530,35 @@ export default function GrandTreeApp() {
   const [aiStatus, setAiStatus] = useState("INITIALIZING...");
   const [debugMode, setDebugMode] = useState(false);
   const [activePhoto, setActivePhoto] = useState<number | null>(null);
+  
+  // 音乐控制状态
+  const [isPlaying, setIsPlaying] = useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  // 播放/暂停控制
+  const toggleMusic = () => {
+    if (audioRef.current) {
+      if (isPlaying) {
+        audioRef.current.pause();
+      } else {
+        audioRef.current.play().catch(e => console.log("Play failed:", e));
+      }
+      setIsPlaying(!isPlaying);
+    }
+  };
 
   // 处理手势指令
   const handleGestureCommand = (command: string) => {
     if (command === 'CHAOS') {
       setSceneState('CHAOS');
-      setActivePhoto(null); // 散开时取消选择
+      setActivePhoto(null);
     } else if (command === 'FORMED') {
       setSceneState('FORMED');
+      // 如果还没播放音乐，且识别到组装树的手势（握拳），自动播放音乐
+      if (audioRef.current && !isPlaying) {
+        audioRef.current.play().then(() => setIsPlaying(true)).catch(e => console.log("Auto play prevented"));
+      }
     } else if (command === 'PICK_ONE') {
-      // 随机选择一张照片放大
       if (sceneState === 'FORMED') {
         const randomId = Math.floor(Math.random() * CONFIG.counts.ornaments);
         setActivePhoto(randomId);
@@ -572,6 +568,9 @@ export default function GrandTreeApp() {
 
   return (
     <div style={{ width: '100vw', height: '100vh', backgroundColor: '#000', position: 'relative', overflow: 'hidden' }}>
+      {/* 背景音乐元素 */}
+      <audio ref={audioRef} src="./music.mp3" loop />
+
       <div style={{ width: '100%', height: '100%', position: 'absolute', top: 0, left: 0, zIndex: 1 }}>
         <Canvas dpr={[1, 2]} gl={{ toneMapping: THREE.ReinhardToneMapping }} shadows>
             <Experience 
@@ -602,6 +601,11 @@ export default function GrandTreeApp() {
 
       {/* UI - Buttons */}
       <div style={{ position: 'absolute', bottom: '30px', right: '40px', zIndex: 10, display: 'flex', gap: '10px' }}>
+        {/* 音乐开关按钮 */}
+        <button onClick={toggleMusic} style={{ padding: '12px 15px', backgroundColor: isPlaying ? '#FFD700' : 'rgba(0,0,0,0.5)', border: '1px solid #FFD700', color: isPlaying ? '#000' : '#FFD700', fontFamily: 'sans-serif', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer', backdropFilter: 'blur(4px)' }}>
+           {isPlaying ? '🎵 PLAYING' : '🔇 MUSIC OFF'}
+        </button>
+        
         <button onClick={() => setDebugMode(!debugMode)} style={{ padding: '12px 15px', backgroundColor: debugMode ? '#FFD700' : 'rgba(0,0,0,0.5)', border: '1px solid #FFD700', color: debugMode ? '#000' : '#FFD700', fontFamily: 'sans-serif', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer', backdropFilter: 'blur(4px)' }}>
            {debugMode ? 'HIDE DEBUG' : '🛠 DEBUG'}
         </button>
