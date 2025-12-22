@@ -125,7 +125,7 @@ const PhotoOrnaments = ({ state, activeId, onSelect }: { state: 'CHAOS' | 'FORME
   const count = CONFIG.counts.ornaments;
   const groupRef = useRef<THREE.Group>(null);
 
-  // 【核心修改】使用基础的 1x1 平面，后续通过 scale 属性来拉伸成图片的实际比例
+  // 基础 1x1 平面，后续通过 scale 拉伸
   const baseGeometry = useMemo(() => new THREE.PlaneGeometry(1, 1), []);
 
   const data = useMemo(() => {
@@ -137,7 +137,6 @@ const PhotoOrnaments = ({ state, activeId, onSelect }: { state: 'CHAOS' | 'FORME
       const theta = Math.random() * Math.PI * 2;
       const targetPos = new THREE.Vector3(currentRadius * Math.cos(theta), y, currentRadius * Math.sin(theta));
 
-      // 稍微调大一点基础缩放，因为我们要动态调整长宽
       const isBig = Math.random() < 0.2;
       const baseScale = isBig ? 1.8 : 0.6 + Math.random() * 0.5;
       const weight = 0.8 + Math.random() * 1.2;
@@ -207,17 +206,10 @@ const PhotoOrnaments = ({ state, activeId, onSelect }: { state: 'CHAOS' | 'FORME
   return (
     <group ref={groupRef}>
       {data.map((obj, i) => {
-        // 【核心修改】动态计算比例
         const tex = textures[obj.textureIndex];
-        // 如果图片还没加载完，默认是正方形；加载完了就用 image.width / image.height
         const aspect = tex.image ? (tex.image.width / tex.image.height) : 1;
-        
-        // 设定一个固定的高度，宽度随比例变化
         const pHeight = 1.2;
         const pWidth = pHeight * aspect;
-
-        // 边框比照片稍微大一点
-        // 底部留多一点白边 (拍立得效果: pHeight + 0.4)
         const borderW = pWidth + 0.2;
         const borderH = pHeight + 0.4;
 
@@ -237,7 +229,7 @@ const PhotoOrnaments = ({ state, activeId, onSelect }: { state: 'CHAOS' | 'FORME
             <mesh 
               geometry={baseGeometry} 
               position={[0, 0, 0.015]} 
-              scale={[pWidth, pHeight, 1]} // 动态拉伸
+              scale={[pWidth, pHeight, 1]} 
             >
               <meshStandardMaterial
                 map={tex}
@@ -248,7 +240,6 @@ const PhotoOrnaments = ({ state, activeId, onSelect }: { state: 'CHAOS' | 'FORME
             </mesh>
             
             {/* Front: Border */}
-            {/* 边框中心点稍微下移一点，配合下方更宽的留白 */}
             <mesh 
               geometry={baseGeometry} 
               position={[0, -0.1, -0.01]} 
@@ -275,7 +266,7 @@ const PhotoOrnaments = ({ state, activeId, onSelect }: { state: 'CHAOS' | 'FORME
             {/* Back: Border */}
             <mesh 
               geometry={baseGeometry} 
-              position={[0, -0.1, -0.015]} // Back border position needs to match front visually but slightly offset in Z
+              position={[0, -0.1, -0.015]}
               rotation={[0, Math.PI, 0]}
               scale={[borderW, borderH, 1]}
             >
@@ -456,9 +447,9 @@ const Experience = ({ sceneState, rotationSpeed, activeId, onSelect }: any) => {
            <FairyLights state={sceneState} />
            <TopStar state={sceneState} />
         </Suspense>
-        {/* 原有光斑 */}
+        {/* 光斑 */}
         <Sparkles count={600} scale={50} size={8} speed={0.4} opacity={0.4} color={CONFIG.colors.silver} />
-        {/* 【漫天雪花特效】 */}
+        {/* 雪花特效 */}
         <Sparkles count={1500} scale={[40, 40, 40]} size={2} speed={0.8} opacity={0.6} color="#FFFFFF" noise={0.2} />
       </group>
 
@@ -611,77 +602,4 @@ export default function GrandTreeApp() {
         audioRef.current.play().then(() => setIsPlaying(true)).catch(() => {});
       }
     } else if (command === 'PICK_ONE') {
-      // 只有在散开状态下 (CHAOS) 才允许比耶放大图片
-      setSceneState((currentState) => {
-         if (currentState === 'CHAOS') {
-            const randomId = Math.floor(Math.random() * CONFIG.counts.ornaments);
-            setActivePhoto(randomId);
-         }
-         return currentState;
-      });
-    }
-  }, [isPlaying]);
-
-  return (
-    <div style={{ width: '100vw', height: '100vh', backgroundColor: '#000', position: 'relative', overflow: 'hidden' }}>
-      <audio ref={audioRef} src="./music.mp3" loop />
-
-      <div style={{ width: '100%', height: '100%', position: 'absolute', top: 0, left: 0, zIndex: 1 }}>
-        <Canvas dpr={[1, 2]} gl={{ toneMapping: THREE.ReinhardToneMapping }} shadows>
-            <Experience 
-              sceneState={sceneState} 
-              rotationSpeed={rotationSpeed} 
-              activeId={activePhoto}
-              onSelect={setActivePhoto}
-            />
-        </Canvas>
-      </div>
-      <GestureController onGesture={handleGestureCommand} onMove={setRotationSpeed} onStatus={setAiStatus} debugMode={debugMode} />
-
-      {/* UI - Stats */}
-      <div style={{ position: 'absolute', bottom: '80px', left: '20px', color: '#888', zIndex: 10, fontFamily: 'sans-serif', userSelect: 'none', pointerEvents: 'none' }}>
-        <div style={{ marginBottom: '10px' }}>
-          <p style={{ fontSize: '18px', color: '#FFD700', fontWeight: 'bold', margin: 0 }}>
-            {CONFIG.counts.ornaments.toLocaleString()} <span style={{ fontSize: '10px', color: '#555', fontWeight: 'normal' }}>PHOTOS</span>
-          </p>
-        </div>
-      </div>
-
-      {/* UI - Buttons */}
-      <div style={{ 
-        position: 'absolute', 
-        bottom: '20px', 
-        left: 0, 
-        right: 0, 
-        zIndex: 10, 
-        display: 'flex', 
-        justifyContent: 'center', 
-        flexWrap: 'wrap', 
-        gap: '8px',
-        padding: '0 10px' 
-      }}>
-        <button onClick={toggleMusic} style={{ padding: '8px 12px', backgroundColor: isPlaying ? '#FFD700' : 'rgba(0,0,0,0.5)', border: '1px solid #FFD700', color: isPlaying ? '#000' : '#FFD700', fontFamily: 'sans-serif', fontSize: '10px', fontWeight: 'bold', cursor: 'pointer', backdropFilter: 'blur(4px)', borderRadius: '4px' }}>
-           {isPlaying ? '🎵 ON' : '🔇 OFF'}
-        </button>
-        
-        <button onClick={() => setDebugMode(!debugMode)} style={{ padding: '8px 12px', backgroundColor: debugMode ? '#FFD700' : 'rgba(0,0,0,0.5)', border: '1px solid #FFD700', color: debugMode ? '#000' : '#FFD700', fontFamily: 'sans-serif', fontSize: '10px', fontWeight: 'bold', cursor: 'pointer', backdropFilter: 'blur(4px)', borderRadius: '4px' }}>
-           {debugMode ? 'HIDE' : '🛠 DEBUG'}
-        </button>
-        
-        <button onClick={() => setSceneState(s => s === 'CHAOS' ? 'FORMED' : 'CHAOS')} style={{ padding: '8px 20px', backgroundColor: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255, 215, 0, 0.5)', color: '#FFD700', fontFamily: 'serif', fontSize: '12px', fontWeight: 'bold', letterSpacing: '1px', textTransform: 'uppercase', cursor: 'pointer', backdropFilter: 'blur(4px)', borderRadius: '4px' }}>
-           {sceneState === 'CHAOS' ? 'ASSEMBLE' : 'DISPERSE'}
-        </button>
-      </div>
-
-      {/* UI - Instructions */}
-      <div style={{ position: 'absolute', top: '20px', width: '100%', textAlign: 'center', color: 'rgba(255,255,255,0.6)', fontSize: '10px', zIndex: 5, pointerEvents: 'none' }}>
-        <p>👋Open:Reset | ✊Fist:Start | ✌️Victory:Pick</p>
-      </div>
-
-      {/* UI - AI Status */}
-      <div style={{ position: 'absolute', top: '45px', left: '50%', transform: 'translateX(-50%)', color: aiStatus.includes('ERROR') ? '#FF0000' : 'rgba(255, 215, 0, 0.4)', fontSize: '9px', letterSpacing: '1px', zIndex: 10, background: 'rgba(0,0,0,0.5)', padding: '2px 6px', borderRadius: '4px', whiteSpace: 'nowrap' }}>
-        {aiStatus}
-      </div>
-    </div>
-  );
-}
+      setSceneState((currentS
