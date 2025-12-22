@@ -119,13 +119,12 @@ const Foliage = ({ state }: { state: 'CHAOS' | 'FORMED' }) => {
   );
 };
 
-// --- Component: Photo Ornaments (Adaptive Ratio) ---
+// --- Component: Photo Ornaments (Adaptive Ratio & Centered) ---
 const PhotoOrnaments = ({ state, activeId, onSelect }: { state: 'CHAOS' | 'FORMED', activeId: number | null, onSelect: (id: number | null) => void }) => {
   const textures = useTexture(CONFIG.photos.body);
   const count = CONFIG.counts.ornaments;
   const groupRef = useRef<THREE.Group>(null);
 
-  // 基础 1x1 平面，后续通过 scale 拉伸
   const baseGeometry = useMemo(() => new THREE.PlaneGeometry(1, 1), []);
 
   const data = useMemo(() => {
@@ -173,19 +172,23 @@ const PhotoOrnaments = ({ state, activeId, onSelect }: { state: 'CHAOS' | 'FORME
       const isActive = activeId === i;
       let target;
       if (isActive) {
-        const direction = new THREE.Vector3(0, 0, -25).applyQuaternion(stateObj.camera.quaternion);
+        // 【核心修改】计算屏幕正中心位置
+        // 0,0,-18 表示相机正前方18个单位处（之前是25，现在拉近了，会显得更大更居中）
+        const direction = new THREE.Vector3(0, 0, -18).applyQuaternion(stateObj.camera.quaternion);
         target = cameraPos.clone().add(direction);
       } else {
         target = isFormed ? objData.targetPos : objData.chaosPos;
       }
-      const speed = isActive ? 3.0 : (isFormed ? 0.8 * objData.weight : 0.5);
+      const speed = isActive ? 3.5 : (isFormed ? 0.8 * objData.weight : 0.5);
       objData.currentPos.lerp(target, delta * speed);
       group.position.copy(objData.currentPos);
 
       if (isActive) {
+        // 始终面朝相机
         group.lookAt(cameraPos);
-        const targetScale = 6.0;
-        group.scale.lerp(new THREE.Vector3(targetScale, targetScale, targetScale), delta * 3);
+        // 放大倍数增加，确保居中时足够清晰
+        const targetScale = 7.0;
+        group.scale.lerp(new THREE.Vector3(targetScale, targetScale, targetScale), delta * 4);
       } else if (isFormed) {
          const targetLookPos = new THREE.Vector3(group.position.x * 2, group.position.y + 0.5, group.position.z * 2);
          group.lookAt(targetLookPos);
@@ -238,7 +241,6 @@ const PhotoOrnaments = ({ state, activeId, onSelect }: { state: 'CHAOS' | 'FORME
                 side={THREE.FrontSide}
               />
             </mesh>
-            
             {/* Front: Border */}
             <mesh 
               geometry={baseGeometry} 
@@ -247,7 +249,6 @@ const PhotoOrnaments = ({ state, activeId, onSelect }: { state: 'CHAOS' | 'FORME
             >
               <meshStandardMaterial color={obj.borderColor} roughness={0.9} metalness={0} side={THREE.FrontSide} />
             </mesh>
-
             {/* Back: Photo (Mirror) */}
             <mesh 
               geometry={baseGeometry} 
@@ -262,7 +263,6 @@ const PhotoOrnaments = ({ state, activeId, onSelect }: { state: 'CHAOS' | 'FORME
                 side={THREE.FrontSide}
               />
             </mesh>
-
             {/* Back: Border */}
             <mesh 
               geometry={baseGeometry} 
@@ -483,7 +483,8 @@ const GestureController = ({ onGesture, onMove, onStatus, debugMode }: any) => {
     let lastGestureTime = 0;
 
     const setup = async () => {
-      onStatusRef.current("DOWNLOADING AI...");
+      // AI状态文字只有在 debugMode 时才会显示
+      if (debugMode) onStatusRef.current("DOWNLOADING AI...");
       try {
         const vision = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm");
         gestureRecognizer = await GestureRecognizer.createFromOptions(vision, {
@@ -494,20 +495,20 @@ const GestureController = ({ onGesture, onMove, onStatus, debugMode }: any) => {
           runningMode: "VIDEO",
           numHands: 1
         });
-        onStatusRef.current("REQUESTING CAMERA...");
+        if (debugMode) onStatusRef.current("REQUESTING CAMERA...");
         if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
           const stream = await navigator.mediaDevices.getUserMedia({ video: true });
           if (videoRef.current) {
             videoRef.current.srcObject = stream;
             videoRef.current.play();
-            onStatusRef.current("AI READY: SHOW HAND");
+            if (debugMode) onStatusRef.current("AI READY: SHOW HAND");
             predictWebcam();
           }
         } else {
-            onStatusRef.current("ERROR: CAMERA PERMISSION DENIED");
+            if (debugMode) onStatusRef.current("ERROR: CAMERA PERMISSION DENIED");
         }
       } catch (err: any) {
-        onStatusRef.current(`ERROR: ${err.message || 'MODEL FAILED'}`);
+        if (debugMode) onStatusRef.current(`ERROR: ${err.message || 'MODEL FAILED'}`);
       }
     };
 
@@ -654,10 +655,12 @@ export default function GrandTreeApp() {
         </button>
       </div>
 
-      {/* UI - AI Status */}
-      <div style={{ position: 'absolute', top: '45px', left: '50%', transform: 'translateX(-50%)', color: aiStatus.includes('ERROR') ? '#FF0000' : 'rgba(255, 215, 0, 0.4)', fontSize: '9px', letterSpacing: '1px', zIndex: 10, background: 'rgba(0,0,0,0.5)', padding: '2px 6px', borderRadius: '4px', whiteSpace: 'nowrap' }}>
-        {aiStatus}
-      </div>
+      {/* UI - AI Status (只在 DEBUG 模式下显示) */}
+      {debugMode && (
+        <div style={{ position: 'absolute', top: '45px', left: '50%', transform: 'translateX(-50%)', color: aiStatus.includes('ERROR') ? '#FF0000' : 'rgba(255, 215, 0, 0.4)', fontSize: '9px', letterSpacing: '1px', zIndex: 10, background: 'rgba(0,0,0,0.5)', padding: '2px 6px', borderRadius: '4px', whiteSpace: 'nowrap' }}>
+            {aiStatus}
+        </div>
+      )}
     </div>
   );
 }
