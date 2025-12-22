@@ -26,8 +26,8 @@ jobs:
       - name: 安装依赖
         run: npm install
         
-      # 【关键修改】这里直接把你的仓库名写死，告诉程序图片就在这个文件夹里
-      - name: 强力打包 (指定仓库路径)
+      # 必须确保这里是 /christmas-tree/
+      - name: 强力打包
         run: npx vite build --base=/christmas-tree/
         
       - name: 上传构建产物
