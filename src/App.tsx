@@ -17,7 +17,7 @@ import * as random from 'maath/random';
 import { GestureRecognizer, FilesetResolver, DrawingUtils } from "@mediapipe/tasks-vision";
 
 // --- 动态生成照片列表 ---
-const TOTAL_NUMBERED_PHOTOS = 42;
+const TOTAL_NUMBERED_PHOTOS = 31;
 const bodyPhotoPaths = [
   './photos/top.jpg',
   ...Array.from({ length: TOTAL_NUMBERED_PHOTOS }, (_, i) => `./photos/${i + 1}.jpg`)
@@ -119,14 +119,14 @@ const Foliage = ({ state }: { state: 'CHAOS' | 'FORMED' }) => {
   );
 };
 
-// --- Component: Photo Ornaments ---
+// --- Component: Photo Ornaments (Adaptive Ratio) ---
 const PhotoOrnaments = ({ state, activeId, onSelect }: { state: 'CHAOS' | 'FORMED', activeId: number | null, onSelect: (id: number | null) => void }) => {
   const textures = useTexture(CONFIG.photos.body);
   const count = CONFIG.counts.ornaments;
   const groupRef = useRef<THREE.Group>(null);
 
-  const borderGeometry = useMemo(() => new THREE.PlaneGeometry(1.2, 1.5), []);
-  const photoGeometry = useMemo(() => new THREE.PlaneGeometry(1, 1), []);
+  // 【核心修改】使用基础的 1x1 平面，后续通过 scale 属性来拉伸成图片的实际比例
+  const baseGeometry = useMemo(() => new THREE.PlaneGeometry(1, 1), []);
 
   const data = useMemo(() => {
     return new Array(count).fill(0).map((_, i) => {
@@ -137,8 +137,9 @@ const PhotoOrnaments = ({ state, activeId, onSelect }: { state: 'CHAOS' | 'FORME
       const theta = Math.random() * Math.PI * 2;
       const targetPos = new THREE.Vector3(currentRadius * Math.cos(theta), y, currentRadius * Math.sin(theta));
 
+      // 稍微调大一点基础缩放，因为我们要动态调整长宽
       const isBig = Math.random() < 0.2;
-      const baseScale = isBig ? 2.2 : 0.8 + Math.random() * 0.6;
+      const baseScale = isBig ? 1.8 : 0.6 + Math.random() * 0.5;
       const weight = 0.8 + Math.random() * 1.2;
       const borderColor = CONFIG.colors.borders[Math.floor(Math.random() * CONFIG.colors.borders.length)];
 
@@ -205,48 +206,84 @@ const PhotoOrnaments = ({ state, activeId, onSelect }: { state: 'CHAOS' | 'FORME
 
   return (
     <group ref={groupRef}>
-      {data.map((obj, i) => (
-        <group 
-          key={i} 
-          scale={[obj.scale, obj.scale, obj.scale]} 
-          rotation={state === 'CHAOS' ? obj.chaosRotation : [0,0,0]}
-          onClick={(e) => {
-            e.stopPropagation();
-            onSelect(activeId === i ? null : i);
-          }}
-          onPointerOver={() => { document.body.style.cursor = 'pointer'; }}
-          onPointerOut={() => { document.body.style.cursor = 'auto'; }}
-        >
-          {/* Front */}
-          <group position={[0, 0, 0.015]}>
-            <mesh geometry={photoGeometry}>
+      {data.map((obj, i) => {
+        // 【核心修改】动态计算比例
+        const tex = textures[obj.textureIndex];
+        // 如果图片还没加载完，默认是正方形；加载完了就用 image.width / image.height
+        const aspect = tex.image ? (tex.image.width / tex.image.height) : 1;
+        
+        // 设定一个固定的高度，宽度随比例变化
+        const pHeight = 1.2;
+        const pWidth = pHeight * aspect;
+
+        // 边框比照片稍微大一点
+        // 底部留多一点白边 (拍立得效果: pHeight + 0.4)
+        const borderW = pWidth + 0.2;
+        const borderH = pHeight + 0.4;
+
+        return (
+          <group 
+            key={i} 
+            scale={[obj.scale, obj.scale, obj.scale]} 
+            rotation={state === 'CHAOS' ? obj.chaosRotation : [0,0,0]}
+            onClick={(e) => {
+              e.stopPropagation();
+              onSelect(activeId === i ? null : i);
+            }}
+            onPointerOver={() => { document.body.style.cursor = 'pointer'; }}
+            onPointerOut={() => { document.body.style.cursor = 'auto'; }}
+          >
+            {/* Front: Photo */}
+            <mesh 
+              geometry={baseGeometry} 
+              position={[0, 0, 0.015]} 
+              scale={[pWidth, pHeight, 1]} // 动态拉伸
+            >
               <meshStandardMaterial
-                map={textures[obj.textureIndex]}
+                map={tex}
                 roughness={0.5} metalness={0}
-                emissive={CONFIG.colors.white} emissiveMap={textures[obj.textureIndex]} emissiveIntensity={1.0}
+                emissive={CONFIG.colors.white} emissiveMap={tex} emissiveIntensity={1.0}
                 side={THREE.FrontSide}
               />
             </mesh>
-            <mesh geometry={borderGeometry} position={[0, -0.15, -0.01]}>
+            
+            {/* Front: Border */}
+            {/* 边框中心点稍微下移一点，配合下方更宽的留白 */}
+            <mesh 
+              geometry={baseGeometry} 
+              position={[0, -0.1, -0.01]} 
+              scale={[borderW, borderH, 1]} 
+            >
               <meshStandardMaterial color={obj.borderColor} roughness={0.9} metalness={0} side={THREE.FrontSide} />
             </mesh>
-          </group>
-          {/* Back */}
-          <group position={[0, 0, -0.015]} rotation={[0, Math.PI, 0]}>
-            <mesh geometry={photoGeometry}>
+
+            {/* Back: Photo (Mirror) */}
+            <mesh 
+              geometry={baseGeometry} 
+              position={[0, 0, -0.015]} 
+              rotation={[0, Math.PI, 0]}
+              scale={[pWidth, pHeight, 1]}
+            >
               <meshStandardMaterial
-                map={textures[obj.textureIndex]}
+                map={tex}
                 roughness={0.5} metalness={0}
-                emissive={CONFIG.colors.white} emissiveMap={textures[obj.textureIndex]} emissiveIntensity={1.0}
+                emissive={CONFIG.colors.white} emissiveMap={tex} emissiveIntensity={1.0}
                 side={THREE.FrontSide}
               />
             </mesh>
-            <mesh geometry={borderGeometry} position={[0, -0.15, -0.01]}>
+
+            {/* Back: Border */}
+            <mesh 
+              geometry={baseGeometry} 
+              position={[0, -0.1, -0.015]} // Back border position needs to match front visually but slightly offset in Z
+              rotation={[0, Math.PI, 0]}
+              scale={[borderW, borderH, 1]}
+            >
               <meshStandardMaterial color={obj.borderColor} roughness={0.9} metalness={0} side={THREE.FrontSide} />
             </mesh>
           </group>
-        </group>
-      ))}
+        );
+      })}
     </group>
   );
 };
@@ -419,7 +456,10 @@ const Experience = ({ sceneState, rotationSpeed, activeId, onSelect }: any) => {
            <FairyLights state={sceneState} />
            <TopStar state={sceneState} />
         </Suspense>
+        {/* 原有光斑 */}
         <Sparkles count={600} scale={50} size={8} speed={0.4} opacity={0.4} color={CONFIG.colors.silver} />
+        {/* 【漫天雪花特效】 */}
+        <Sparkles count={1500} scale={[40, 40, 40]} size={2} speed={0.8} opacity={0.6} color="#FFFFFF" noise={0.2} />
       </group>
 
       <EffectComposer>
@@ -430,18 +470,15 @@ const Experience = ({ sceneState, rotationSpeed, activeId, onSelect }: any) => {
   );
 };
 
-// --- Gesture Controller (Fixed for Infinite Loop & Stability) ---
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+// --- Gesture Controller ---
 const GestureController = ({ onGesture, onMove, onStatus, debugMode }: any) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   
-  // 使用 Ref 保存最新的回调函数，这样 useEffect 不需要依赖它们，避免死循环
   const onGestureRef = useRef(onGesture);
   const onMoveRef = useRef(onMove);
   const onStatusRef = useRef(onStatus);
 
-  // 每次渲染更新 ref
   useEffect(() => {
     onGestureRef.current = onGesture;
     onMoveRef.current = onMove;
@@ -455,7 +492,6 @@ const GestureController = ({ onGesture, onMove, onStatus, debugMode }: any) => {
     let lastGestureTime = 0;
 
     const setup = async () => {
-      // 使用 ref 调用，防止闭包过时
       onStatusRef.current("DOWNLOADING AI...");
       try {
         const vision = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm");
@@ -490,7 +526,6 @@ const GestureController = ({ onGesture, onMove, onStatus, debugMode }: any) => {
             const results = gestureRecognizer.recognizeForVideo(videoRef.current, Date.now());
             const ctx = canvasRef.current.getContext("2d");
             
-            // 绘制调试画面
             if (ctx && debugMode) {
                 ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
                 canvasRef.current.width = videoRef.current.videoWidth; 
@@ -534,7 +569,7 @@ const GestureController = ({ onGesture, onMove, onStatus, debugMode }: any) => {
     };
     setup();
     return () => cancelAnimationFrame(requestRef);
-  }, [debugMode]); // 关键：依赖项极少，不再依赖回调函数，彻底杜绝死循环
+  }, [debugMode]);
 
   return (
     <>
@@ -552,7 +587,6 @@ export default function GrandTreeApp() {
   const [debugMode, setDebugMode] = useState(false);
   const [activePhoto, setActivePhoto] = useState<number | null>(null);
   
-  // 音乐控制
   const [isPlaying, setIsPlaying] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
@@ -567,7 +601,6 @@ export default function GrandTreeApp() {
     }
   };
 
-  // 使用 useCallback 包裹回调，虽然 GestureController 已经做了防护，这也是双重保险
   const handleGestureCommand = useCallback((command: string) => {
     if (command === 'CHAOS') {
       setSceneState('CHAOS');
@@ -578,8 +611,9 @@ export default function GrandTreeApp() {
         audioRef.current.play().then(() => setIsPlaying(true)).catch(() => {});
       }
     } else if (command === 'PICK_ONE') {
+      // 只有在散开状态下 (CHAOS) 才允许比耶放大图片
       setSceneState((currentState) => {
-         if (currentState === 'FORMED') {
+         if (currentState === 'CHAOS') {
             const randomId = Math.floor(Math.random() * CONFIG.counts.ornaments);
             setActivePhoto(randomId);
          }
@@ -604,7 +638,7 @@ export default function GrandTreeApp() {
       </div>
       <GestureController onGesture={handleGestureCommand} onMove={setRotationSpeed} onStatus={setAiStatus} debugMode={debugMode} />
 
-      {/* UI - Stats (Mobile Optimized) */}
+      {/* UI - Stats */}
       <div style={{ position: 'absolute', bottom: '80px', left: '20px', color: '#888', zIndex: 10, fontFamily: 'sans-serif', userSelect: 'none', pointerEvents: 'none' }}>
         <div style={{ marginBottom: '10px' }}>
           <p style={{ fontSize: '18px', color: '#FFD700', fontWeight: 'bold', margin: 0 }}>
@@ -613,7 +647,7 @@ export default function GrandTreeApp() {
         </div>
       </div>
 
-      {/* UI - Buttons (Mobile Responsive: Centered & Wrap) */}
+      {/* UI - Buttons */}
       <div style={{ 
         position: 'absolute', 
         bottom: '20px', 
