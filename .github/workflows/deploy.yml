@@ -26,9 +26,9 @@ jobs:
       - name: 安装依赖
         run: npm install
         
-      # 修改点在这里：我们直接用 vite build，跳过 tsc 代码检查
-      - name: 强力打包 (跳过检查)
-        run: npx vite build --base=/${{ github.event.repository.name }}/
+      # 【重点修改了这里】把 base 改成了 ./ (当前目录)，这是解决白屏的特效药
+      - name: 强力打包 (修复路径问题)
+        run: npx vite build --base=./
         
       - name: 上传构建产物
         uses: actions/upload-pages-artifact@v3
