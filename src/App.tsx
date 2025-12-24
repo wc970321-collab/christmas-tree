@@ -119,12 +119,11 @@ const Foliage = ({ state }: { state: 'CHAOS' | 'FORMED' }) => {
   );
 };
 
-// --- Component: Photo Ornaments (Centered & Responsive) ---
+// --- Component: Photo Ornaments (Fixed Center & Sized) ---
 const PhotoOrnaments = ({ state, activeId, onSelect, treeYPosition }: { state: 'CHAOS' | 'FORMED', activeId: number | null, onSelect: (id: number | null) => void, treeYPosition: number }) => {
   const textures = useTexture(CONFIG.photos.body);
   const count = CONFIG.counts.ornaments;
   const groupRef = useRef<THREE.Group>(null);
-  // 获取屏幕尺寸信息
   const { viewport } = useThree();
 
   const baseGeometry = useMemo(() => new THREE.PlaneGeometry(1, 1), []);
@@ -175,18 +174,21 @@ const PhotoOrnaments = ({ state, activeId, onSelect, treeYPosition }: { state: '
       let target;
 
       if (isActive) {
-        // 【核心修复：完美居中算法】
-        // 1. 获取相机前方固定距离（例如 15 单位）的世界坐标点
-        // 2. 将该世界坐标点转换为“树”的局部坐标系
-        // 这样无论树在哪里，照片都会乖乖飞到相机正前方
+        // 【核心修复：完美居中 + 适中距离】
+        // 不再单纯依赖 lookAt 的前方，而是取相机和原点之间的位置
+        // 这样可以确保物体出现在屏幕物理中心，而不是飞出屏幕
+        const cameraPos = camera.position.clone();
+        const origin = new THREE.Vector3(0, 0, 0); // 场景中心
         
-        const distanceInFront = 15; // 照片悬浮在相机前方多远
-        const vector = new THREE.Vector3(0, 0, -distanceInFront);
-        vector.applyQuaternion(camera.quaternion);
-        const targetWorldPos = camera.position.clone().add(vector);
+        // 计算目标位置：在相机到场景中心的连线上，靠近相机 20% 的位置
+        // 这样既不会太近（糊脸），也不会太远
+        const direction = origin.sub(cameraPos).normalize();
+        // 距离相机的距离。手机上通常相机Z是80，这里给25的距离比较合适
+        const distance = 25; 
         
-        // 转换为局部坐标：目标世界坐标 - 父容器(树)的世界坐标
-        // 树的坐标是 [0, treeYPosition, 0]
+        const targetWorldPos = cameraPos.add(direction.multiplyScalar(distance));
+
+        // 转换为局部坐标 (减去树的位置偏移)
         target = new THREE.Vector3(
             targetWorldPos.x,
             targetWorldPos.y - treeYPosition, 
@@ -204,12 +206,14 @@ const PhotoOrnaments = ({ state, activeId, onSelect, treeYPosition }: { state: '
       if (isActive) {
         group.lookAt(camera.position);
         
-        // 【动态大小调整】
-        // 无论屏幕多大，让图片占据屏幕宽度的约 30-40%
-        // viewport.width 是当前 3D 视窗的宽度单位
-        const responsiveScale = Math.min(viewport.width, viewport.height) * 0.45;
-        // 限制一下最大和最小尺寸，防止极端的丑陋
-        const finalScale = THREE.MathUtils.clamp(responsiveScale, 3, 8);
+        // 【核心修复：动态缩小尺寸】
+        // 之前系数是 0.45，现在改为 0.25 (手机) 或 0.35 (电脑)
+        // 并且最大值限制从 8 降到 4.5
+        const isPortrait = viewport.width < viewport.height;
+        const ratio = isPortrait ? 0.25 : 0.35;
+        const responsiveScale = Math.min(viewport.width, viewport.height) * ratio;
+        // 限制缩放范围，防止过大或过小
+        const finalScale = THREE.MathUtils.clamp(responsiveScale, 2.0, 4.5);
         
         const targetScaleVector = new THREE.Vector3(finalScale, finalScale, finalScale);
         group.scale.lerp(targetScaleVector, delta * 4);
@@ -587,6 +591,9 @@ export default function GrandTreeApp() {
   
   const [isPlaying, setIsPlaying] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  
+  // 【核心新增】图片轮换防抖时间戳
+  const lastPickTime = useRef(0);
 
   const toggleMusic = () => {
     if (audioRef.current) {
@@ -609,13 +616,18 @@ export default function GrandTreeApp() {
         audioRef.current.play().then(() => setIsPlaying(true)).catch(() => {});
       }
     } else if (command === 'PICK_ONE') {
-      setSceneState((currentState) => {
-         if (currentState === 'CHAOS') {
-            const randomId = Math.floor(Math.random() * CONFIG.counts.ornaments);
-            setActivePhoto(randomId);
-         }
-         return currentState;
-      });
+      // 【核心修改】增加 1.5 秒冷却时间，防止切换太快
+      const now = Date.now();
+      if (now - lastPickTime.current > 1500) {
+          lastPickTime.current = now;
+          setSceneState((currentState) => {
+             if (currentState === 'CHAOS') {
+                const randomId = Math.floor(Math.random() * CONFIG.counts.ornaments);
+                setActivePhoto(randomId);
+             }
+             return currentState;
+          });
+      }
     }
   }, [isPlaying]);
 
